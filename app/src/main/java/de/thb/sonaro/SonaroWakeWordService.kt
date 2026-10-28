@@ -8,12 +8,19 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
+import android.media.AudioAttributes
+import android.media.AudioManager
+import android.media.MediaPlayer
+import android.media.RingtoneManager
 import android.os.Binder
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.provider.Settings
 import android.util.Log
 import com.voicute.wakeword.AudioCapture
 import com.voicute.wakeword.DetectionLogic
@@ -219,9 +226,22 @@ class SonaroWakeWordService : Service(), AudioCapture.Listener {
         }
     }
 
+    private val ALERT_DURATION_MS = 5_000L
+    private val FLASH_INTERVAL_MS = 250L
+
     private fun handleWakeWordDetected(word: String, probability: Float) {
-        // TODO Trigger actions such as flashing flashlight and playing music
         println("Sonaro wake word detected!")
+
+        if (alertActive) return
+        alertActive = true
+
+        wakeScreen()
+        maxBrightness()
+        maxVolume() // must come before startSound()
+
+        mainHandler.post(flashRunnable)
+        startSound()
+        mainHandler.postDelayed(stopAlertRunnable, ALERT_DURATION_MS)
     }
 
     private fun stopWakeWordDetection() {
@@ -233,9 +253,167 @@ class SonaroWakeWordService : Service(), AudioCapture.Listener {
         wakeLock = null
     }
 
+    private var mediaPlayer: MediaPlayer? = null
+    private var alertActive = false
+    private var torchOn = false
+
+    private val cameraManager by lazy { getSystemService(CameraManager::class.java) }
+
+    private val torchId: String? by lazy {
+        try {
+            cameraManager.cameraIdList.firstOrNull { id ->
+                val c = cameraManager.getCameraCharacteristics(id)
+                c.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true &&
+                        c.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not look up flashlight", e)
+            null
+        }
+    }
+
+    private val flashRunnable = object : Runnable {
+        override fun run() {
+            torchOn = !torchOn
+            setTorch(torchOn)
+            mainHandler.postDelayed(this, FLASH_INTERVAL_MS)
+        }
+    }
+
+    private val stopAlertRunnable = Runnable { stopAlert() }
+
+    private fun setTorch(on: Boolean) {
+        val id = torchId ?: return
+        try {
+            cameraManager.setTorchMode(id, on)
+        } catch (e: Exception) {
+            Log.e(TAG, "Torch error", e)
+        }
+    }
+
+    private fun startSound() {
+        try {
+            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            mediaPlayer = MediaPlayer().apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                setDataSource(this@SonaroWakeWordService, uri)
+                isLooping = true
+                setOnPreparedListener { it.start() }
+                prepareAsync()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not play sound", e)
+        }
+    }
+
+    private fun stopAlert() {
+        mainHandler.removeCallbacks(flashRunnable)
+        mainHandler.removeCallbacks(stopAlertRunnable)
+        if (torchOn) setTorch(false)
+        torchOn = false
+
+        mediaPlayer?.let {
+            try { it.stop() } catch (_: IllegalStateException) {}
+            it.release()
+        }
+        mediaPlayer = null
+        alertActive = false
+
+        restoreVolume()
+        restoreBrightness()
+        releaseScreen()
+    }
+
+    private var screenWakeLock: PowerManager.WakeLock? = null
+    private var savedVolume: Int? = null
+    private var savedBrightness: Int? = null
+    private var savedBrightnessMode: Int? = null
+
+    private val audioManager by lazy { getSystemService(AudioManager::class.java) }
+
+    private fun wakeScreen() {
+        try {
+            val pm = getSystemService(PowerManager::class.java)
+            @Suppress("DEPRECATION")
+            screenWakeLock = pm.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                "Sonaro:Screen"
+            ).apply { acquire(ALERT_DURATION_MS + 1_000) } // auto-releases as a safety net
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not wake screen", e)
+        }
+    }
+
+    private fun releaseScreen() {
+        screenWakeLock?.let { if (it.isHeld) it.release() }
+        screenWakeLock = null
+    }
+
+    private fun maxBrightness() {
+        if (!Settings.System.canWrite(this)) {
+            Log.w(TAG, "WRITE_SETTINGS not granted, skipping brightness")
+            return
+        }
+        try {
+            val cr = contentResolver
+            savedBrightnessMode = Settings.System.getInt(
+                cr, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
+            )
+            savedBrightness = Settings.System.getInt(cr, Settings.System.SCREEN_BRIGHTNESS, 128)
+            Settings.System.putInt(
+                cr, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
+            )
+            Settings.System.putInt(cr, Settings.System.SCREEN_BRIGHTNESS, 255)
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not set brightness", e)
+        }
+    }
+
+    private fun restoreBrightness() {
+        val mode = savedBrightnessMode
+        val brightness = savedBrightness
+        if (mode == null || brightness == null) return
+        try {
+            val cr = contentResolver
+            Settings.System.putInt(cr, Settings.System.SCREEN_BRIGHTNESS, brightness)
+            Settings.System.putInt(cr, Settings.System.SCREEN_BRIGHTNESS_MODE, mode)
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not restore brightness", e)
+        }
+        savedBrightness = null
+        savedBrightnessMode = null
+    }
+
+    private fun maxVolume() {
+        try {
+            val stream = AudioManager.STREAM_ALARM
+            savedVolume = audioManager.getStreamVolume(stream)
+            audioManager.setStreamVolume(stream, audioManager.getStreamMaxVolume(stream), 0)
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not set volume", e)
+        }
+    }
+
+    private fun restoreVolume() {
+        val v = savedVolume ?: return
+        try {
+            audioManager.setStreamVolume(AudioManager.STREAM_ALARM, v, 0)
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not restore volume", e)
+        }
+        savedVolume = null
+    }
+
     override fun onDestroy() {
         println("stopWakeWordDetection")
         stopWakeWordDetection()
+        stopAlert()
         super.onDestroy()
     }
 }

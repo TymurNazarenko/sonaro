@@ -17,6 +17,9 @@ import androidx.core.content.ContextCompat
 import android.Manifest.permission.WAKE_LOCK;
 import android.Manifest.permission.RECORD_AUDIO;
 import android.Manifest.permission.POST_NOTIFICATIONS;
+import android.net.Uri
+import android.provider.Settings
+import androidx.core.net.toUri
 
 class MainActivity : ComponentActivity() {
 
@@ -97,6 +100,10 @@ class MainActivity : ComponentActivity() {
             if (!hasPermission(WAKE_LOCK)) {
                 wakeLockPermissionLauncher.launch(WAKE_LOCK)
             }
+
+            if (!Settings.System.canWrite(this)) {
+                startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, "package:$packageName".toUri()))
+            }
         }
     }
 
@@ -105,7 +112,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun hasAllPermissions(): Boolean {
-        return hasPermission(RECORD_AUDIO) && hasPermission(POST_NOTIFICATIONS) && hasPermission(POST_NOTIFICATIONS)
+        return hasPermission(RECORD_AUDIO) && hasPermission(POST_NOTIFICATIONS) && hasPermission(POST_NOTIFICATIONS) && Settings.System.canWrite(this)
     }
 
     private fun startWakeWordService() {
