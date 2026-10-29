@@ -3,16 +3,238 @@
               android:layout_width="match_parent"
               android:layout_height="match_parent"
               android:orientation="vertical"
-              android:gravity="center"
               android:background="#1A0B2E">
 
-    <Button
-            android:id="@+id/centerButton"
-            android:layout_width="120dp"
-            android:layout_height="120dp"
-            android:text="Sonaro Logo Here"
-            android:textColor="#FFFFFF"
-            android:textSize="16sp"
-            android:backgroundTint="#7C4DFF" />
+    <!-- Tab content -->
+    <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
 
+        <!-- Main tab -->
+        <LinearLayout
+                android:id="@+id/mainTab"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:gravity="center">
+
+            <Button
+                    android:id="@+id/centerButton"
+                    android:layout_width="120dp"
+                    android:layout_height="120dp"
+                    android:text="Sonaro Logo Here"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp"
+                    android:backgroundTint="#7C4DFF" />
+        </LinearLayout>
+
+        <!-- Settings tab -->
+        <ScrollView
+                android:id="@+id/settingsTab"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:fillViewport="true"
+                android:visibility="gone">
+
+            <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="20dp">
+
+                <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Sonaro will react to the phrase \&quot;Hey Jarvis\&quot;."
+                        android:textColor="#FFFFFF"
+                        android:textSize="18sp" />
+
+                <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:text="When the phrase is spoken, Sonaro will: "
+                        android:textColor="#FFFFFF"
+                        android:textSize="16sp" />
+
+                <CheckBox
+                        android:id="@+id/flashCheckBox"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="Flash flashlight"
+                        android:textColor="#FFFFFF"
+                        android:buttonTint="#7C4DFF"
+                        android:checked="true" />
+
+                <CheckBox
+                        android:id="@+id/unlockCheckBox"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Unlock screen"
+                        android:textColor="#FFFFFF"
+                        android:buttonTint="#7C4DFF"
+                        android:checked="true" />
+
+                <!-- Brightness -->
+                <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:orientation="horizontal">
+
+                    <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Increase brightness to"
+                            android:textColor="#FFFFFF"
+                            android:textSize="16sp" />
+
+                    <TextView
+                            android:id="@+id/brightnessValue"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="100%"
+                            android:textColor="#B39DFF"
+                            android:textSize="16sp" />
+                </LinearLayout>
+
+                <SeekBar
+                        android:id="@+id/brightnessSeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="100"
+                        android:progress="100"
+                        android:progressTint="#7C4DFF"
+                        android:thumbTint="#7C4DFF" />
+
+                <!-- Volume -->
+                <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:orientation="horizontal">
+
+                    <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Increase volume to"
+                            android:textColor="#FFFFFF"
+                            android:textSize="16sp" />
+
+                    <TextView
+                            android:id="@+id/volumeValue"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="100%"
+                            android:textColor="#B39DFF"
+                            android:textSize="16sp" />
+                </LinearLayout>
+
+                <SeekBar
+                        android:id="@+id/volumeSeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="100"
+                        android:progress="100"
+                        android:progressTint="#7C4DFF"
+                        android:thumbTint="#7C4DFF" />
+
+                <CheckBox
+                        android:id="@+id/soundCheckBox"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:text="Play sound"
+                        android:textColor="#FFFFFF"
+                        android:buttonTint="#7C4DFF"
+                        android:checked="true" />
+
+                <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:text="For the following: "
+                        android:textColor="#FFFFFF"
+                        android:textSize="16sp" />
+
+                <!-- Duration (1-30 s, SeekBar progress 0-29) -->
+                <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:orientation="horizontal">
+
+                    <TextView
+                            android:id="@+id/durationValue"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="5"
+                            android:textColor="#B39DFF"
+                            android:textSize="16sp" />
+
+                    <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="6dp"
+                            android:text="seconds"
+                            android:textColor="#FFFFFF"
+                            android:textSize="16sp" />
+                </LinearLayout>
+
+                <SeekBar
+                        android:id="@+id/durationSeekBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="29"
+                        android:progress="4"
+                        android:progressTint="#7C4DFF"
+                        android:thumbTint="#7C4DFF" />
+            </LinearLayout>
+        </ScrollView>
+    </FrameLayout>
+
+    <!-- Divider -->
+    <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#33FFFFFF" />
+
+    <!-- Bottom tab bar -->
+    <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:orientation="horizontal"
+            android:background="#241040">
+
+        <TextView
+                android:id="@+id/tabMain"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="Main"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:textColor="#B39DFF"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="?android:attr/selectableItemBackground" />
+
+        <TextView
+                android:id="@+id/tabSettings"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="Settings"
+                android:textSize="16sp"
+                android:textColor="#80FFFFFF"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="?android:attr/selectableItemBackground" />
+    </LinearLayout>
 </LinearLayout>

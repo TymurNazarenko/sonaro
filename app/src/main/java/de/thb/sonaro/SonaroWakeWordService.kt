@@ -44,9 +44,73 @@ class SonaroWakeWordService : Service(), AudioCapture.Listener {
         const val MIN_RESTART_GAP_MS = 600_000L          // never restart capture more often than every 10 min
         const val RMS_GATE = 30f                         // skip inference when near-silent (saves CPU/battery)
         const val THRESHOLD = 0.50f                      // detection probability threshold
+        const val PREFS = "sonaro_prefs"
+        const val KEY_ENABLED = "detection_enabled"
+        const val KEY_FLASH = "flash_flashlight"
+        const val KEY_UNLOCK = "unlock_screen"
+        const val KEY_BRIGHTNESS = "brightness_percent"
+        const val KEY_VOLUME = "volume_percent"
+        const val KEY_SOUND = "play_sound"
+        const val KEY_DURATION = "duration_seconds"
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    private val prefs by lazy { getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
+
+    /** Whether the user has wake word detection switched on. The service itself keeps running either way. */
+    var isDetectionEnabled: Boolean = true
+        private set
+
+    /** Called on the main thread whenever detection is toggled. Set by the bound UI. */
+    var stateListener: ((Boolean) -> Unit)? = null
+
+    /** Turns wake word detection on or off (main thread only). The foreground service stays alive. */
+    fun setDetectionEnabled(enabled: Boolean) {
+        isDetectionEnabled = enabled
+        prefs.edit().putBoolean(KEY_ENABLED, enabled).apply()
+
+        if (enabled) {
+            startWakeWordDetection()
+        } else {
+            stopWakeWordDetection()
+            stopAlert()
+        }
+        stateListener?.invoke(enabled)
+    }
+
+    // ---- User settings (persisted; read fresh on every alert, so changes apply immediately) ----
+
+    /** Blink the flashlight while the alert is active. */
+    var flashFlashlight: Boolean
+        get() = prefs.getBoolean(KEY_FLASH, true)
+        set(value) { prefs.edit().putBoolean(KEY_FLASH, value).apply() }
+
+    /** Turn the screen on when the wake word is heard. */
+    var unlockScreen: Boolean
+        get() = prefs.getBoolean(KEY_UNLOCK, true)
+        set(value) { prefs.edit().putBoolean(KEY_UNLOCK, value).apply() }
+
+    /** Screen brightness (0-100 %) to raise to during the alert. Never lowers the current brightness. */
+    var brightnessPercent: Int
+        get() = prefs.getInt(KEY_BRIGHTNESS, 100)
+        set(value) { prefs.edit().putInt(KEY_BRIGHTNESS, value.coerceIn(0, 100)).apply() }
+
+    /** Alarm volume (0-100 %) to raise to during the alert. Never lowers the current volume. */
+    var volumePercent: Int
+        get() = prefs.getInt(KEY_VOLUME, 100)
+        set(value) { prefs.edit().putInt(KEY_VOLUME, value.coerceIn(0, 100)).apply() }
+
+    /** Play the alarm sound during the alert. */
+    var playSound: Boolean
+        get() = prefs.getBoolean(KEY_SOUND, true)
+        set(value) { prefs.edit().putBoolean(KEY_SOUND, value).apply() }
+
+    /** How long (1-30 s) the alert actions last. */
+    var durationSeconds: Int
+        get() = prefs.getInt(KEY_DURATION, 5)
+        set(value) { prefs.edit().putInt(KEY_DURATION, value.coerceIn(1, 30)).apply() }
+
     private var wakeLock: PowerManager.WakeLock? = null
 
     // Owned and cleaned up by the inference thread
@@ -56,6 +120,7 @@ class SonaroWakeWordService : Service(), AudioCapture.Listener {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        isDetectionEnabled = prefs.getBoolean(KEY_ENABLED, true)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -72,7 +137,7 @@ class SonaroWakeWordService : Service(), AudioCapture.Listener {
             startForeground(1, notification)
         }
 
-        startWakeWordDetection()
+        if (isDetectionEnabled) startWakeWordDetection()
 
         return START_STICKY
     }
@@ -103,9 +168,14 @@ class SonaroWakeWordService : Service(), AudioCapture.Listener {
         }
 
         // onStartCommand can run multiple times (START_STICKY, repeated startService calls)
-        if (inferThread?.isAlive == true) {
-            Log.w(TAG, "Wake word detection already running, ignoring duplicate start")
-            return
+        val old = inferThread
+        if (old?.isAlive == true) {
+            if (running) {
+                Log.w(TAG, "Wake word detection already running, ignoring duplicate start")
+                return
+            }
+            // A previous thread is still shutting down (e.g. quick off/on toggle); wait so the mic is released
+            try { old.join(1_000) } catch (_: InterruptedException) { return }
         }
 
         val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
@@ -226,28 +296,27 @@ class SonaroWakeWordService : Service(), AudioCapture.Listener {
         }
     }
 
-    private val ALERT_DURATION_MS = 5_000L
+    private val alertDurationMs: Long get() = durationSeconds * 1_000L
     private val FLASH_INTERVAL_MS = 250L
 
     private fun handleWakeWordDetected(word: String, probability: Float) {
         println("Sonaro wake word detected!")
 
-        if (alertActive) return
+        if (!isDetectionEnabled || alertActive) return
         alertActive = true
 
-        wakeScreen()
-        maxBrightness()
-        maxVolume() // must come before startSound()
+        if (unlockScreen) wakeScreen()
+        raiseBrightness()
+        if (playSound) raiseVolume() // must come before startSound()
 
-        mainHandler.post(flashRunnable)
-        startSound()
-        mainHandler.postDelayed(stopAlertRunnable, ALERT_DURATION_MS)
+        if (flashFlashlight) mainHandler.post(flashRunnable)
+        if (playSound) startSound()
+        mainHandler.postDelayed(stopAlertRunnable, alertDurationMs)
     }
 
     private fun stopWakeWordDetection() {
         running = false
-        inferThread?.interrupt()
-        inferThread = null // the thread stops the capture and closes the engine itself
+        inferThread?.interrupt() // the thread stops the capture and closes the engine itself
 
         wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
@@ -344,7 +413,7 @@ class SonaroWakeWordService : Service(), AudioCapture.Listener {
             screenWakeLock = pm.newWakeLock(
                 PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
                 "Sonaro:Screen"
-            ).apply { acquire(ALERT_DURATION_MS + 1_000) } // auto-releases as a safety net
+            ).apply { acquire(alertDurationMs + 1_000) } // auto-releases as a safety net
         } catch (e: Exception) {
             Log.e(TAG, "Could not wake screen", e)
         }
@@ -355,7 +424,9 @@ class SonaroWakeWordService : Service(), AudioCapture.Listener {
         screenWakeLock = null
     }
 
-    private fun maxBrightness() {
+    private fun raiseBrightness() {
+        val target = brightnessPercent * 255 / 100
+        if (target <= 0) return
         if (!Settings.System.canWrite(this)) {
             Log.w(TAG, "WRITE_SETTINGS not granted, skipping brightness")
             return
@@ -366,10 +437,15 @@ class SonaroWakeWordService : Service(), AudioCapture.Listener {
                 cr, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
             )
             savedBrightness = Settings.System.getInt(cr, Settings.System.SCREEN_BRIGHTNESS, 128)
+            if (target <= savedBrightness!!) { // already bright enough, only ever increase
+                savedBrightness = null
+                savedBrightnessMode = null
+                return
+            }
             Settings.System.putInt(
                 cr, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
             )
-            Settings.System.putInt(cr, Settings.System.SCREEN_BRIGHTNESS, 255)
+            Settings.System.putInt(cr, Settings.System.SCREEN_BRIGHTNESS, target)
         } catch (e: Exception) {
             Log.e(TAG, "Could not set brightness", e)
         }
@@ -390,11 +466,14 @@ class SonaroWakeWordService : Service(), AudioCapture.Listener {
         savedBrightnessMode = null
     }
 
-    private fun maxVolume() {
+    private fun raiseVolume() {
         try {
             val stream = AudioManager.STREAM_ALARM
-            savedVolume = audioManager.getStreamVolume(stream)
-            audioManager.setStreamVolume(stream, audioManager.getStreamMaxVolume(stream), 0)
+            val current = audioManager.getStreamVolume(stream)
+            val target = Math.round(audioManager.getStreamMaxVolume(stream) * volumePercent / 100f)
+            if (target <= current) return // already loud enough, only ever increase
+            savedVolume = current
+            audioManager.setStreamVolume(stream, target, 0)
         } catch (e: Exception) {
             Log.e(TAG, "Could not set volume", e)
         }
