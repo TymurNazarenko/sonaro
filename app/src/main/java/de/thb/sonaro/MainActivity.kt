@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.os.IBinder
 import android.util.Log
 import android.widget.Button
+import android.widget.ImageButton
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
@@ -27,13 +28,15 @@ import android.view.View
 import android.widget.CheckBox
 import android.widget.SeekBar
 import android.widget.TextView
+import android.provider.OpenableColumns
 
 class MainActivity : ComponentActivity() {
 
     private var service: SonaroWakeWordService? = null
     private var isBound = false
     private var isActivityStarted = false
-    private lateinit var button: Button
+    private lateinit var button: ImageButton
+    private lateinit var statusText: TextView
 
     // Tabs
     private lateinit var mainTab: View
@@ -51,6 +54,13 @@ class MainActivity : ComponentActivity() {
     private lateinit var volumeValue: TextView
     private lateinit var durationSeekBar: SeekBar
     private lateinit var durationValue: TextView
+    private lateinit var soundFileName: TextView
+    private lateinit var chooseSoundButton: Button
+    private lateinit var clearSoundButton: Button
+
+    // The picker sends the activity to the background, which unbinds the service (see onStop).
+    // A picked file that arrives while unbound is held here and applied on reconnect.
+    private var pendingSoundUri: Uri? = null
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
@@ -58,6 +68,8 @@ class MainActivity : ComponentActivity() {
             service = s
             s.stateListener = { enabled -> updateButton(enabled) }
             updateButton(s.isDetectionEnabled)
+            pendingSoundUri?.let { applyCustomSound(s, it) }
+            pendingSoundUri = null
             loadSettings(s)
             Log.d("MainActivity", "Connected to SonaroWakeWordService")
         }
@@ -67,6 +79,26 @@ class MainActivity : ComponentActivity() {
             updateButton(false)
             setSettingsEnabled(false)
             Log.d("MainActivity", "Disconnected from SonaroWakeWordService")
+        }
+    }
+
+    private val soundPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@registerForActivityResult // picker cancelled
+
+        // Keep read access across restarts / reboots
+        try {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Could not persist access to $uri", e)
+        }
+
+        val s = service
+        if (s != null) {
+            applyCustomSound(s, uri)
+        } else {
+            pendingSoundUri = uri
         }
     }
 
@@ -105,6 +137,7 @@ class MainActivity : ComponentActivity() {
         setContentView(R.layout.activity_main)
 
         button = findViewById(R.id.centerButton)
+        statusText = findViewById(R.id.statusText)
         updateButton(false) // red until we know the service state
 
         setupTabs()
@@ -157,6 +190,9 @@ class MainActivity : ComponentActivity() {
         volumeValue = findViewById(R.id.volumeValue)
         durationSeekBar = findViewById(R.id.durationSeekBar)
         durationValue = findViewById(R.id.durationValue)
+        soundFileName = findViewById(R.id.soundFileName)
+        chooseSoundButton = findViewById(R.id.chooseSoundButton)
+        clearSoundButton = findViewById(R.id.clearSoundButton)
 
         // Controls stay disabled until the service is connected
         setSettingsEnabled(false)
@@ -165,6 +201,9 @@ class MainActivity : ComponentActivity() {
         flashCheckBox.setOnCheckedChangeListener { _, checked -> service?.flashFlashlight = checked }
         unlockCheckBox.setOnCheckedChangeListener { _, checked -> service?.unlockScreen = checked }
         soundCheckBox.setOnCheckedChangeListener { _, checked -> service?.playSound = checked }
+
+        chooseSoundButton.setOnClickListener { soundPickerLauncher.launch(arrayOf("audio/*")) }
+        clearSoundButton.setOnClickListener { service?.let { clearCustomSound(it) } }
 
         brightnessSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
@@ -207,6 +246,49 @@ class MainActivity : ComponentActivity() {
         volumeSeekBar.progress = s.volumePercent
         durationSeekBar.progress = s.durationSeconds - 1
         setSettingsEnabled(true)
+        updateSoundUi(s)
+    }
+
+    // ---- Custom alarm sound ----
+
+    private fun applyCustomSound(s: SonaroWakeWordService, uri: Uri) {
+        releaseSoundPermission(s.customSoundUri, keep = uri)
+        s.customSoundUri = uri.toString()
+        updateSoundUi(s)
+    }
+
+    /** Removes the custom sound so the default alarm is used again. */
+    private fun clearCustomSound(s: SonaroWakeWordService) {
+        releaseSoundPermission(s.customSoundUri, keep = null)
+        s.customSoundUri = null
+        updateSoundUi(s)
+    }
+
+    /** Gives back the persisted read permission of a previously chosen file (the system caps how many an app can hold). */
+    private fun releaseSoundPermission(oldUri: String?, keep: Uri?) {
+        if (oldUri == null || oldUri == keep?.toString()) return
+        try {
+            contentResolver.releasePersistableUriPermission(oldUri.toUri(), Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Could not release access to $oldUri", e)
+        }
+    }
+
+    private fun updateSoundUi(s: SonaroWakeWordService) {
+        val uri = s.customSoundUri
+        soundFileName.text = if (uri == null) "Default alarm" else soundDisplayName(uri.toUri())
+        clearSoundButton.isEnabled = uri != null && chooseSoundButton.isEnabled
+    }
+
+    private fun soundDisplayName(uri: Uri): String {
+        val name = try {
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) c.getString(0) else null
+            }
+        } catch (e: Exception) {
+            null
+        }
+        return name ?: uri.lastPathSegment ?: "Custom sound"
     }
 
     private fun setSettingsEnabled(enabled: Boolean) {
@@ -216,11 +298,16 @@ class MainActivity : ComponentActivity() {
         brightnessSeekBar.isEnabled = enabled
         volumeSeekBar.isEnabled = enabled
         durationSeekBar.isEnabled = enabled
+        chooseSoundButton.isEnabled = enabled
+        // Clear is only useful while a custom sound is set; updateSoundUi refines this once connected
+        clearSoundButton.isEnabled = enabled && (service?.customSoundUri != null)
     }
 
     private fun updateButton(enabled: Boolean) {
         val color = if (enabled) Color.rgb(46, 160, 67) else Color.rgb(200, 50, 50)
         button.backgroundTintList = ColorStateList.valueOf(color)
+        // INVISIBLE (not GONE) so the button doesn't shift when the text appears
+        statusText.visibility = if (enabled) View.VISIBLE else View.INVISIBLE
     }
 
     override fun onStart() {

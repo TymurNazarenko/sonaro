@@ -16,17 +16,48 @@
                 android:id="@+id/mainTab"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:orientation="vertical"
-                android:gravity="center">
+                android:orientation="vertical">
 
-            <Button
-                    android:id="@+id/centerButton"
-                    android:layout_width="120dp"
-                    android:layout_height="120dp"
-                    android:text="Sonaro Logo Here"
+            <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="32dp"
+                    android:gravity="center"
+                    android:text="Sonaro"
                     android:textColor="#FFFFFF"
-                    android:textSize="16sp"
-                    android:backgroundTint="#7C4DFF" />
+                    android:textSize="32sp"
+                    android:textStyle="bold" />
+
+            <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:gravity="center">
+
+                <ImageButton
+                        android:id="@+id/centerButton"
+                        android:layout_width="160dp"
+                        android:layout_height="160dp"
+                        android:background="@drawable/bg_power_button"
+                        android:backgroundTint="#C83232"
+                        android:src="@drawable/ic_power"
+                        android:scaleType="fitCenter"
+                        android:padding="10dp"
+                        android:elevation="8dp"
+                        android:contentDescription="Turn listening on or off" />
+
+                <TextView
+                        android:id="@+id/statusText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="24dp"
+                        android:gravity="center"
+                        android:text="Listening in the background."
+                        android:textColor="#B39DFF"
+                        android:textSize="16sp"
+                        android:visibility="invisible" />
+            </LinearLayout>
         </LinearLayout>
 
         <!-- Settings tab -->
@@ -152,6 +183,51 @@
                         android:textColor="#FFFFFF"
                         android:buttonTint="#7C4DFF"
                         android:checked="true" />
+
+                <!-- Custom alarm sound -->
+                <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="Alarm sound"
+                        android:textColor="#FFFFFF"
+                        android:textSize="14sp" />
+
+                <TextView
+                        android:id="@+id/soundFileName"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Default alarm"
+                        android:textColor="#B39DFF"
+                        android:textSize="14sp"
+                        android:singleLine="true"
+                        android:ellipsize="middle" />
+
+                <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:orientation="horizontal">
+
+                    <Button
+                            android:id="@+id/chooseSoundButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Choose file"
+                            android:textColor="#FFFFFF"
+                            android:backgroundTint="#7C4DFF" />
+
+                    <Button
+                            android:id="@+id/clearSoundButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginStart="8dp"
+                            android:text="Clear"
+                            android:textColor="#FFFFFF"
+                            android:backgroundTint="#7C4DFF" />
+                </LinearLayout>
 
                 <TextView
                         android:layout_width="match_parent"

@@ -14,6 +14,7 @@ import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
+import android.net.Uri
 import android.os.Binder
 import android.os.Build
 import android.os.Handler
@@ -52,6 +53,7 @@ class SonaroWakeWordService : Service(), AudioCapture.Listener {
         const val KEY_VOLUME = "volume_percent"
         const val KEY_SOUND = "play_sound"
         const val KEY_DURATION = "duration_seconds"
+        const val KEY_SOUND_URI = "custom_sound_uri"
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -105,6 +107,15 @@ class SonaroWakeWordService : Service(), AudioCapture.Listener {
     var playSound: Boolean
         get() = prefs.getBoolean(KEY_SOUND, true)
         set(value) { prefs.edit().putBoolean(KEY_SOUND, value).apply() }
+
+    /** URI (as string) of the user's chosen alarm sound, or null to use the default alarm. */
+    var customSoundUri: String?
+        get() = prefs.getString(KEY_SOUND_URI, null)
+        set(value) {
+            prefs.edit().apply {
+                if (value == null) remove(KEY_SOUND_URI) else putString(KEY_SOUND_URI, value)
+            }.apply()
+        }
 
     /** How long (1-30 s) the alert actions last. */
     var durationSeconds: Int
@@ -360,11 +371,20 @@ class SonaroWakeWordService : Service(), AudioCapture.Listener {
         }
     }
 
-    private fun startSound() {
+    /**
+     * Plays the user's custom sound if one is set, otherwise the default alarm.
+     * If the custom file can't be played (deleted, permission lost, unsupported format),
+     * falls back to the default alarm so the alert is never silent.
+     */
+    private fun startSound(allowCustom: Boolean = true) {
+        val custom: Uri? = if (allowCustom) customSoundUri?.let { Uri.parse(it) } else null
+        val player = MediaPlayer()
+        mediaPlayer = player
         try {
-            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+            val uri = custom
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
                 ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            mediaPlayer = MediaPlayer().apply {
+            player.apply {
                 setAudioAttributes(
                     AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_ALARM)
@@ -374,10 +394,22 @@ class SonaroWakeWordService : Service(), AudioCapture.Listener {
                 setDataSource(this@SonaroWakeWordService, uri)
                 isLooping = true
                 setOnPreparedListener { it.start() }
+                setOnErrorListener { mp, what, extra ->
+                    Log.e(TAG, "MediaPlayer error what=$what extra=$extra")
+                    mp.release()
+                    if (mediaPlayer === mp) {
+                        mediaPlayer = null
+                        if (custom != null && alertActive) startSound(allowCustom = false)
+                    }
+                    true
+                }
                 prepareAsync()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Could not play sound", e)
+            player.release()
+            if (mediaPlayer === player) mediaPlayer = null
+            if (custom != null) startSound(allowCustom = false)
         }
     }
 
